@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { startOfIsoWeek, toYmd } from '../utils';
 
 const computeDefaults = (defaultSourceDate) => {
   const todayMon = toYmd(startOfIsoWeek(new Date()));
   const source = defaultSourceDate ? toYmd(startOfIsoWeek(defaultSourceDate)) : todayMon;
-  const dest = toYmd(startOfIsoWeek(new Date(Date.now() + 7 * 24 * 3600 * 1000)));
+  const sourceDate = defaultSourceDate ? new Date(defaultSourceDate) : new Date();
+  const destDate = new Date(sourceDate.getTime() + 7 * 24 * 3600 * 1000);
+  const dest = toYmd(startOfIsoWeek(destDate));
   return { source, dest };
 };
 
@@ -13,6 +15,14 @@ const CopyWeekModal = ({ open, defaultSourceDate, onClose, onConfirm }) => {
   const [sourceFrom, setSourceFrom] = useState(() => computeDefaults(defaultSourceDate).source);
   const [destFrom, setDestFrom] = useState(() => computeDefaults(defaultSourceDate).dest);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const next = computeDefaults(defaultSourceDate);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSourceFrom(next.source);
+    setDestFrom(next.dest);
+  }, [open, defaultSourceDate]);
 
   if (!open) return null;
 

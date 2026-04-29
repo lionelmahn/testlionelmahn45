@@ -425,6 +425,11 @@ class WorkScheduleService
                     'work_role' => 'Vai tro cong viec khong phu hop voi chuyen mon bac si (E4).',
                 ]);
             }
+        } elseif (in_array($payload['work_role'], self::DOCTOR_WORK_ROLES, true)) {
+            // E4 (reverse): non-doctors cannot hold doctor-specific work roles
+            throw ValidationException::withMessages([
+                'work_role' => 'Vai tro cong viec danh rieng cho bac si, khong the gan cho nhan su nay (E4).',
+            ]);
         }
 
         // E1: overlap on same day
