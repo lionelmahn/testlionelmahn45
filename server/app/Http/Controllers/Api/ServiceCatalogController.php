@@ -37,11 +37,13 @@ class ServiceCatalogController extends Controller
 
     public function show(Request $request, int $id): JsonResponse
     {
-        $service = $this->services->findService($id);
-
         $user = $request->user();
         $role = $user?->roles->first()?->slug ?? null;
-        if ($role === 'benh_nhan'
+        $isPatient = $role === 'benh_nhan';
+
+        $service = $this->services->findService($id, publicAttachmentsOnly: $isPatient);
+
+        if ($isPatient
             && ($service->visibility !== Service::VISIBILITY_PUBLIC
                 || $service->status !== Service::STATUS_ACTIVE)
         ) {

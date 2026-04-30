@@ -17,14 +17,19 @@ class ServiceAttachmentController extends Controller
     {
     }
 
-    public function index(int $serviceId): JsonResponse
+    public function index(Request $request, int $serviceId): JsonResponse
     {
-        $items = ServiceAttachment::where('service_id', $serviceId)
+        $query = ServiceAttachment::where('service_id', $serviceId)
             ->with('uploader:id,name')
-            ->orderByDesc('id')
-            ->get();
+            ->orderByDesc('id');
 
-        return response()->json($items);
+        $user = $request->user();
+        $role = $user?->roles->first()?->slug ?? null;
+        if ($role === 'benh_nhan') {
+            $query->where('visibility', ServiceAttachment::VISIBILITY_PUBLIC);
+        }
+
+        return response()->json($query->get());
     }
 
     public function store(Request $request, int $serviceId): JsonResponse

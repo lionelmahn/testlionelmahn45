@@ -29,6 +29,13 @@ class ServiceAttachment extends Model
         'file_size' => 'integer',
     ];
 
+    /**
+     * Internal storage path is never returned in API responses.
+     */
+    protected $hidden = [
+        'file_path',
+    ];
+
     public function service(): BelongsTo
     {
         return $this->belongsTo(Service::class);

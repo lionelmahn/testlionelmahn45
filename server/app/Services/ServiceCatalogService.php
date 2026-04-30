@@ -62,17 +62,24 @@ class ServiceCatalogService
         return $query->orderBy('id', 'desc')->paginate(min($perPage, 100));
     }
 
-    public function findService(int $id): Service
+    public function findService(int $id, bool $publicAttachmentsOnly = false): Service
     {
-        return Service::with([
+        $attachmentLoader = $publicAttachmentsOnly
+            ? [
+                'attachments' => fn ($q) => $q
+                    ->where('visibility', ServiceAttachment::VISIBILITY_PUBLIC)
+                    ->with('uploader:id,name'),
+            ]
+            : ['attachments.uploader:id,name'];
+
+        return Service::with(array_merge([
             'group',
             'specialties',
-            'attachments.uploader:id,name',
             'priceHistory.changer:id,name',
             'statusHistory.changer:id,name',
             'creator:id,name',
             'updater:id,name',
-        ])->findOrFail($id);
+        ], $attachmentLoader))->findOrFail($id);
     }
 
     public function publicListServices(array $filters): LengthAwarePaginator
@@ -439,6 +446,13 @@ class ServiceCatalogService
             }
         }
 
+        if (isset($payload['service_code'])) {
+            $payload['service_code'] = strtoupper(Str::slug($payload['service_code'], ''));
+            if ($payload['service_code'] === '') {
+                $payload['service_code'] = null;
+            }
+        }
+
         if (! $isUpdate) {
             if (empty($payload['service_code'])) {
                 $payload['service_code'] = $this->generateNextCode();
@@ -449,22 +463,25 @@ class ServiceCatalogService
             $payload['price'] = $payload['price'] ?? 0;
         }
 
-        if (isset($payload['service_code'])) {
-            $payload['service_code'] = strtoupper(Str::slug($payload['service_code'], ''));
-        }
-
         return $payload;
     }
 
     private function generateNextCode(): string
     {
-        $last = Service::orderByDesc('id')->value('service_code');
-        $next = 1;
-        if ($last && preg_match('/(\d+)$/', $last, $m)) {
-            $next = ((int) $m[1]) + 1;
-        }
+        $max = 0;
+        Service::query()
+            ->where('service_code', 'like', 'DV%')
+            ->pluck('service_code')
+            ->each(function ($code) use (&$max) {
+                if (preg_match('/^DV(\d+)$/', (string) $code, $m)) {
+                    $n = (int) $m[1];
+                    if ($n > $max) {
+                        $max = $n;
+                    }
+                }
+            });
 
-        return 'DV'.str_pad((string) $next, 4, '0', STR_PAD_LEFT);
+        return 'DV'.str_pad((string) ($max + 1), 4, '0', STR_PAD_LEFT);
     }
 
     public function recentAuditLogs(int $limit = 30): Collection
