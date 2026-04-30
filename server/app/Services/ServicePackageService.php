@@ -695,7 +695,8 @@ class ServicePackageService
     {
         $i = 1;
         do {
-            $candidate = substr($base, 0, 26).'_C'.$i;
+            $suffix = '_C'.$i;
+            $candidate = substr($base, 0, 30 - strlen($suffix)).$suffix;
             if (! ServicePackage::where('code', $candidate)->exists()) {
                 return $candidate;
             }

@@ -190,7 +190,7 @@ const ServicePackageManagement = () => {
             selectedId={selectedId}
             onSelect={setSelectedId}
             onEdit={canManage ? handleEdit : undefined}
-            onMore={canManage ? handleChangeStatus : undefined}
+            onChangeStatus={canManage ? handleChangeStatus : undefined}
             loading={loading}
             page={meta.current_page}
             perPage={perPage}

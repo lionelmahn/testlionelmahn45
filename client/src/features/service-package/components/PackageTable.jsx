@@ -2,7 +2,7 @@ import React from 'react';
 import { STATUS_BADGE_CLASS, STATUS_LABELS, VISIBILITY_LABELS } from '../constants';
 import { formatDate, formatVnd } from '../utils';
 
-const PackageTable = ({ items, selectedId, onSelect, onEdit, onMore, loading, page, perPage }) => {
+const PackageTable = ({ items, selectedId, onSelect, onEdit, onChangeStatus, loading, page, perPage }) => {
   if (loading) {
     return <div className="p-6 text-xs text-gray-500">Đang tải...</div>;
   }
@@ -78,14 +78,14 @@ const PackageTable = ({ items, selectedId, onSelect, onEdit, onMore, loading, pa
                         ✎
                       </button>
                     )}
-                    {onMore && (
+                    {onChangeStatus && (
                       <button
                         type="button"
-                        onClick={() => onMore(p)}
+                        onClick={() => onChangeStatus(p)}
                         className="p-1 border rounded bg-white text-gray-600 hover:bg-gray-50"
-                        title="Tác vụ khác"
+                        title="Đổi trạng thái"
                       >
-                        •••
+                        ⇋
                       </button>
                     )}
                   </div>
