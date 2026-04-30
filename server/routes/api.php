@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\MyProfessionalProfileController;
 use App\Http\Controllers\Api\MyWorkScheduleController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\ProfessionalProfileController;
+use App\Http\Controllers\Api\ServiceAttachmentController;
+use App\Http\Controllers\Api\ServiceCatalogController;
 use App\Http\Controllers\Api\ShiftSwapRequestController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\PermissionController;
@@ -15,6 +17,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
+Route::get('/public/services', [ServiceCatalogController::class, 'publicIndex']);
+Route::get('/public/service-groups', [ServiceCatalogController::class, 'groups']);
 Route::post('/verify-login-otp', [AuthController::class, 'verifyLoginOtp']);
 Route::post('/auth/google', [AuthController::class, 'googleLogin']);
 
@@ -86,7 +90,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/roles', [UserController::class, 'getAllRoles']);
         Route::get('/admin/dashboard-stats', [DashboardController::class, 'getAdminStats']);
 
-        // Work Schedule Management
+        // Service Catalog (UC4.1)
+        Route::post('/services', [ServiceCatalogController::class, 'store']);
+        Route::put('/services/{service}', [ServiceCatalogController::class, 'update'])->whereNumber('service');
+        Route::post('/services/{service}/status', [ServiceCatalogController::class, 'changeStatus'])->whereNumber('service');
+        Route::delete('/services/{service}', [ServiceCatalogController::class, 'destroy'])->whereNumber('service');
+        Route::post('/services/{service}/attachments', [ServiceAttachmentController::class, 'store'])->whereNumber('service');
+        Route::delete('/services/{service}/attachments/{attachment}', [ServiceAttachmentController::class, 'destroy'])->whereNumber('service')->whereNumber('attachment');
+        Route::get('/services/audit-logs', [ServiceCatalogController::class, 'auditLogs']);
+
+        // Work Schedule Management (UC3.3)
         Route::get('/work-schedules', [WorkScheduleController::class, 'index']);
         Route::post('/work-schedules', [WorkScheduleController::class, 'store']);
         Route::post('/work-schedules/copy', [WorkScheduleController::class, 'copy']);
@@ -104,4 +117,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/shift-swap-requests/{swap}/approve', [ShiftSwapRequestController::class, 'approve'])->whereNumber('swap');
         Route::post('/shift-swap-requests/{swap}/reject', [ShiftSwapRequestController::class, 'reject'])->whereNumber('swap');
     });
+
+    // Service catalog (read for any authenticated user, scope filter applied in service)
+    Route::get('/services', [ServiceCatalogController::class, 'index']);
+    Route::get('/services/groups', [ServiceCatalogController::class, 'groups']);
+    Route::get('/services/specialties', [ServiceCatalogController::class, 'specialties']);
+    Route::get('/services/{service}', [ServiceCatalogController::class, 'show'])->whereNumber('service');
+    Route::get('/services/{service}/attachments', [ServiceAttachmentController::class, 'index'])->whereNumber('service');
+    Route::get('/services/{service}/attachments/{attachment}/download', [ServiceAttachmentController::class, 'download'])
+        ->whereNumber('service')->whereNumber('attachment');
 });
