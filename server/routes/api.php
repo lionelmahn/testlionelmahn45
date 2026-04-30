@@ -2,13 +2,17 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\LeaveRequestController;
 use App\Http\Controllers\Api\MyProfessionalProfileController;
+use App\Http\Controllers\Api\MyWorkScheduleController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\ProfessionalProfileController;
 use App\Http\Controllers\Api\ServiceAttachmentController;
 use App\Http\Controllers\Api\ServiceCatalogController;
+use App\Http\Controllers\Api\ShiftSwapRequestController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\PermissionController;
+use App\Http\Controllers\Api\WorkScheduleController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -45,6 +49,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/my-professional-profile', [MyProfessionalProfileController::class, 'show']);
     Route::put('/my-professional-profile/{professionalProfile}', [MyProfessionalProfileController::class, 'update'])->whereNumber('professionalProfile');
     Route::post('/my-professional-profile/{professionalProfile}/submit', [MyProfessionalProfileController::class, 'submit'])->whereNumber('professionalProfile');
+
+    // Lich lam viec - cho moi user da dang nhap
+    Route::get('/my-work-schedule', [MyWorkScheduleController::class, 'index']);
+    Route::get('/staff-lookup', [MyWorkScheduleController::class, 'staffLookup']);
+    Route::get('/work-shift-templates', [WorkScheduleController::class, 'templates']);
+    Route::post('/work-schedules/{schedule}/leave-request', [LeaveRequestController::class, 'store'])->whereNumber('schedule');
+    Route::post('/leave-requests', [LeaveRequestController::class, 'store']);
+    Route::post('/shift-swap-requests', [ShiftSwapRequestController::class, 'store']);
 
     Route::middleware('role:admin')->group(function () {
         Route::get('/users', [UserController::class, 'index']);
@@ -86,6 +98,24 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/services/{service}/attachments', [ServiceAttachmentController::class, 'store'])->whereNumber('service');
         Route::delete('/services/{service}/attachments/{attachment}', [ServiceAttachmentController::class, 'destroy'])->whereNumber('service')->whereNumber('attachment');
         Route::get('/services/audit-logs', [ServiceCatalogController::class, 'auditLogs']);
+
+        // Work Schedule Management (UC3.3)
+        Route::get('/work-schedules', [WorkScheduleController::class, 'index']);
+        Route::post('/work-schedules', [WorkScheduleController::class, 'store']);
+        Route::post('/work-schedules/copy', [WorkScheduleController::class, 'copy']);
+        Route::get('/work-schedules/branch-stats', [WorkScheduleController::class, 'branchStats']);
+        Route::get('/work-schedules/audit-logs', [WorkScheduleController::class, 'auditLogs']);
+        Route::get('/work-schedules/{schedule}', [WorkScheduleController::class, 'show'])->whereNumber('schedule');
+        Route::put('/work-schedules/{schedule}', [WorkScheduleController::class, 'update'])->whereNumber('schedule');
+        Route::delete('/work-schedules/{schedule}', [WorkScheduleController::class, 'destroy'])->whereNumber('schedule');
+
+        Route::get('/leave-requests', [LeaveRequestController::class, 'index']);
+        Route::post('/leave-requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve'])->whereNumber('leaveRequest');
+        Route::post('/leave-requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject'])->whereNumber('leaveRequest');
+
+        Route::get('/shift-swap-requests', [ShiftSwapRequestController::class, 'index']);
+        Route::post('/shift-swap-requests/{swap}/approve', [ShiftSwapRequestController::class, 'approve'])->whereNumber('swap');
+        Route::post('/shift-swap-requests/{swap}/reject', [ShiftSwapRequestController::class, 'reject'])->whereNumber('swap');
     });
 
     // Service catalog (read for any authenticated user, scope filter applied in service)
