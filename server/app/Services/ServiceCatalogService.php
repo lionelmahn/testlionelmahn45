@@ -26,7 +26,7 @@ class ServiceCatalogService
     public function listServices(array $filters): LengthAwarePaginator
     {
         $query = Service::query()
-            ->with(['group', 'specialties', 'creator', 'updater'])
+            ->with(['group', 'specialties', 'creator:id,name', 'updater:id,name'])
             ->withCount('attachments');
 
         if (! empty($filters['search'])) {
@@ -406,12 +406,17 @@ class ServiceCatalogService
             return false;
         }
 
+        $names = array_values(array_unique(array_filter([
+            $specialty->name,
+            Str::ascii((string) $specialty->name),
+        ])));
+
         return ProfessionalProfile::query()
             ->where('profile_role', 'bac_si')
             ->where('status', ProfessionalProfile::STATUS_APPROVED)
             ->where('is_active', true)
-            ->whereHas('specialties', function ($q) use ($specialty) {
-                $q->where('specialty_name', $specialty->name);
+            ->whereHas('specialties', function ($q) use ($names) {
+                $q->whereIn('specialty_name', $names);
             })
             ->whereHas('staff', fn ($q) => $q->where('status', 'working'))
             ->exists();

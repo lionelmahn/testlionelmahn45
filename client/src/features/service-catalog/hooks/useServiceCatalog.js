@@ -76,6 +76,11 @@ export const useServiceCatalog = () => {
     setFilters(DEFAULT_FILTERS);
   }, []);
 
+  const changePerPage = useCallback((next) => {
+    setPage(1);
+    setPerPage(next);
+  }, []);
+
   const create = useCallback(async (payload) => {
     const { data } = await serviceCatalogApi.create(payload);
     await refresh();
@@ -106,7 +111,7 @@ export const useServiceCatalog = () => {
     page,
     setPage,
     perPage,
-    setPerPage,
+    setPerPage: changePerPage,
     items,
     meta,
     loading,
