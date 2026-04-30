@@ -406,6 +406,19 @@ class ServiceCatalogService
         }
     }
 
+    /**
+     * Aliases bridging the canonical {@see Specialty} master table (Unicode, with diacritics)
+     * and the free-text `professional_profile_specialties.specialty_name` column populated
+     * via the legacy professional-profile module (ASCII, sometimes with a different phrasing).
+     *
+     * Keys are ASCII-normalized canonical names; values are extra equivalent names that may
+     * appear in profile records. Pure-ASCII / pure-Unicode matches are handled separately
+     * so they don't need to be listed here.
+     */
+    private const SPECIALTY_NAME_ALIASES = [
+        'Nha tong quat' => ['Rang ham mat tong quat'],
+    ];
+
     private function doctorAvailableForSpecialty(int $specialtyId): bool
     {
         $specialty = Specialty::find($specialtyId);
@@ -413,10 +426,11 @@ class ServiceCatalogService
             return false;
         }
 
-        $names = array_values(array_unique(array_filter([
-            $specialty->name,
-            Str::ascii((string) $specialty->name),
-        ])));
+        $ascii = Str::ascii((string) $specialty->name);
+        $names = array_values(array_unique(array_filter(array_merge(
+            [$specialty->name, $ascii],
+            self::SPECIALTY_NAME_ALIASES[$ascii] ?? []
+        ))));
 
         return ProfessionalProfile::query()
             ->where('profile_role', 'bac_si')
