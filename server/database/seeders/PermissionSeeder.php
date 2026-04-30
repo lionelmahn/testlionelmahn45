@@ -17,6 +17,7 @@ class PermissionSeeder extends Seeder
             'categories' => 'Danh muc',
             'patients' => 'Benh nhan',
             'services' => 'Dich vu nha khoa',
+            'packages' => 'Goi dich vu',
             'appointments' => 'Lich hen',
             'dental_records' => 'Kham nha khoa',
             'finance' => 'Tai chinh',
@@ -53,14 +54,14 @@ class PermissionSeeder extends Seeder
             $adminRole->permissions()->sync($permissionIds);
         }
 
-        // Grant services.view to all non-admin roles so they can browse the
-        // catalog (visibility/status scope is enforced server-side per role).
-        $servicesView = Permission::where('slug', 'services.view')->first();
-        if ($servicesView) {
+        // Grant services.view + packages.view to all non-admin roles so they
+        // can browse the catalog (visibility/status scope enforced server-side).
+        $sharedView = Permission::whereIn('slug', ['services.view', 'packages.view'])->pluck('id')->all();
+        if (! empty($sharedView)) {
             foreach (['bac_si', 'le_tan', 'ke_toan', 'benh_nhan'] as $slug) {
                 $role = Role::where('slug', $slug)->first();
                 if ($role) {
-                    $role->permissions()->syncWithoutDetaching([$servicesView->id]);
+                    $role->permissions()->syncWithoutDetaching($sharedView);
                 }
             }
         }
