@@ -139,9 +139,9 @@ class ServiceCatalogService
             $this->ensureUniqueCode($payload['service_code'], excludeId: $service->id);
         }
 
-        if (! empty($payload['name'])) {
+        if (! empty($payload['name']) || array_key_exists('service_group_id', $payload)) {
             $this->ensureUniqueNameWithinGroup(
-                $payload['name'],
+                $payload['name'] ?? $service->name,
                 $payload['service_group_id'] ?? $service->service_group_id,
                 excludeId: $service->id
             );

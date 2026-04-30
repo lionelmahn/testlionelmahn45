@@ -35,9 +35,20 @@ class ServiceCatalogController extends Controller
         return response()->json($paginator);
     }
 
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
-        return response()->json($this->services->findService($id));
+        $service = $this->services->findService($id);
+
+        $user = $request->user();
+        $role = $user?->roles->first()?->slug ?? null;
+        if ($role === 'benh_nhan'
+            && ($service->visibility !== Service::VISIBILITY_PUBLIC
+                || $service->status !== Service::STATUS_ACTIVE)
+        ) {
+            return response()->json(['message' => 'Khong tim thay dich vu.'], 404);
+        }
+
+        return response()->json($service);
     }
 
     public function store(Request $request): JsonResponse
