@@ -16,6 +16,7 @@ class PermissionSeeder extends Seeder
             'professional_profiles' => 'Ho so chuyen mon',
             'categories' => 'Danh muc',
             'patients' => 'Benh nhan',
+            'services' => 'Dich vu nha khoa',
             'appointments' => 'Lich hen',
             'dental_records' => 'Kham nha khoa',
             'finance' => 'Tai chinh',
@@ -49,6 +50,18 @@ class PermissionSeeder extends Seeder
         $adminRole = Role::where('slug', 'admin')->first();
         if ($adminRole) {
             $adminRole->permissions()->sync($permissionIds);
+        }
+
+        // Grant services.view to all non-admin roles so they can browse the
+        // catalog (visibility/status scope is enforced server-side per role).
+        $servicesView = Permission::where('slug', 'services.view')->first();
+        if ($servicesView) {
+            foreach (['bac_si', 'le_tan', 'ke_toan', 'benh_nhan'] as $slug) {
+                $role = Role::where('slug', $slug)->first();
+                if ($role) {
+                    $role->permissions()->syncWithoutDetaching([$servicesView->id]);
+                }
+            }
         }
     }
 }
