@@ -59,7 +59,8 @@ class ServiceAttachmentController extends Controller
 
         if ($attachment->visibility === 'internal') {
             $user = $request->user();
-            if (! $user || ($user->role_slug ?? null) === 'benh_nhan') {
+            $roleSlug = $user?->roles->first()?->slug;
+            if (! $user || $roleSlug === 'benh_nhan') {
                 return response()->json(['message' => 'Khong co quyen truy cap tai lieu noi bo.'], 403);
             }
         }

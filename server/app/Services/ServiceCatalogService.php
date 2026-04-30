@@ -77,15 +77,10 @@ class ServiceCatalogService
 
     public function publicListServices(array $filters): LengthAwarePaginator
     {
-        $filters['visibility'] = self::publicVisibilityFilter($filters['visibility'] ?? 'public');
+        $filters['visibility'] = Service::VISIBILITY_PUBLIC;
         $filters['status'] = Service::STATUS_ACTIVE;
 
         return $this->listServices($filters);
-    }
-
-    private static function publicVisibilityFilter(string $value): string
-    {
-        return $value === 'public' ? 'public' : 'public';
     }
 
     public function createService(array $data, ?User $actor): Service
@@ -413,7 +408,7 @@ class ServiceCatalogService
 
         return ProfessionalProfile::query()
             ->where('profile_role', 'bac_si')
-            ->where('status', ProfessionalProfile::STATUS_APPROVED ?? 'approved')
+            ->where('status', ProfessionalProfile::STATUS_APPROVED)
             ->where('is_active', true)
             ->whereHas('specialties', function ($q) use ($specialty) {
                 $q->where('specialty_name', $specialty->name);
@@ -470,8 +465,10 @@ class ServiceCatalogService
     public function recentAuditLogs(int $limit = 30): Collection
     {
         return AuditLog::query()
-            ->where('action', 'like', 'service.%')
-            ->orWhere('action', 'like', 'service_attachment.%')
+            ->where(function ($q) {
+                $q->where('action', 'like', 'service.%')
+                    ->orWhere('action', 'like', 'service_attachment.%');
+            })
             ->orderByDesc('created_at')
             ->limit($limit)
             ->get();
