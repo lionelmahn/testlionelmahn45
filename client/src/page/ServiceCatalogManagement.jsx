@@ -8,9 +8,8 @@ import ServiceDetailPanel from '@/features/service-catalog/components/ServiceDet
 import ServiceFormModal from '@/features/service-catalog/components/ServiceFormModal';
 
 const ServiceCatalogManagement = () => {
-  const { userRole, hasPermission } = useAuth();
-  const canManage =
-    userRole === 'admin' || hasPermission('services.create') || hasPermission('services.edit');
+  const { userRole } = useAuth();
+  const canManage = userRole === 'admin';
 
   const {
     items,

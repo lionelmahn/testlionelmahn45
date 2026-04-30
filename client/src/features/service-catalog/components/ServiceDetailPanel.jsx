@@ -32,16 +32,23 @@ const ServiceDetailPanel = ({
       setAttachments([]);
       return;
     }
+    let cancelled = false;
     setLoading(true);
     Promise.all([
       serviceCatalogApi.get(serviceId),
       serviceCatalogApi.attachments(serviceId),
     ])
       .then(([s, a]) => {
+        if (cancelled) return;
         setService(s.data);
         setAttachments(a.data || []);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [serviceId]);
 
   if (!serviceId) {
