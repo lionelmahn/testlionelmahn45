@@ -43,10 +43,16 @@ class ServicePackageService
         }
 
         if (! empty($filters['effective_from'])) {
-            $query->whereDate('effective_to', '>=', $filters['effective_from']);
+            $query->where(function ($q) use ($filters) {
+                $q->whereDate('effective_to', '>=', $filters['effective_from'])
+                    ->orWhereNull('effective_to');
+            });
         }
         if (! empty($filters['effective_to'])) {
-            $query->whereDate('effective_from', '<=', $filters['effective_to']);
+            $query->where(function ($q) use ($filters) {
+                $q->whereDate('effective_from', '<=', $filters['effective_to'])
+                    ->orWhereNull('effective_from');
+            });
         }
 
         $perPage = (int) ($filters['per_page'] ?? 20);

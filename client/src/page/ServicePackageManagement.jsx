@@ -8,6 +8,7 @@ import PackageDetailPanel from '@/features/service-package/components/PackageDet
 import PackageFormWizard from '@/features/service-package/components/PackageFormWizard';
 import PackageStatusModal from '@/features/service-package/components/PackageStatusModal';
 import PackageClonePromptModal from '@/features/service-package/components/PackageClonePromptModal';
+import { servicePackageApi } from '@/api/servicePackageApi';
 
 const ServicePackageManagement = () => {
   const { userRole } = useAuth();
@@ -59,9 +60,20 @@ const ServicePackageManagement = () => {
     setFormOpen(true);
   };
 
-  const handleEdit = (pkg) => {
-    setFormInitial(pkg);
+  const handleEdit = async (pkg) => {
     setFormError('');
+    // The list endpoint only returns items_count, not the full items relation.
+    // Fetch the full package so the wizard can prefill the service items step.
+    if (pkg && (!pkg.items || pkg.items.length === 0) && pkg.id) {
+      try {
+        const { data } = await servicePackageApi.get(pkg.id);
+        setFormInitial(data);
+      } catch {
+        setFormInitial(pkg);
+      }
+    } else {
+      setFormInitial(pkg);
+    }
     setFormOpen(true);
   };
 
