@@ -153,6 +153,37 @@ class ServicePriceTest extends TestCase
         );
     }
 
+    public function test_scheduling_future_price_caps_open_ended_predecessor(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $existing = ServicePrice::where('service_id', $service->id)
+            ->where('status', ServicePrice::STATUS_ACTIVE)
+            ->whereNull('effective_to')
+            ->firstOrFail();
+
+        $futureFrom = Carbon::now()->addMonth()->startOfDay();
+
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 555000,
+            'apply_now' => false,
+            'effective_from' => $futureFrom->toDateString(),
+            'reason' => 'Future scheduled supersedes open-ended',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('status', ServicePrice::STATUS_SCHEDULED);
+
+        $existing->refresh();
+        $this->assertNotNull($existing->effective_to, 'Open-ended predecessor must be capped.');
+        $this->assertTrue(
+            $existing->effective_to->lessThan($futureFrom),
+            'Predecessor effective_to must be strictly before new effective_from.'
+        );
+    }
+
     public function test_admin_create_future_price_is_scheduled(): void
     {
         Sanctum::actingAs($this->createUser('admin'));
@@ -259,6 +290,56 @@ class ServicePriceTest extends TestCase
         ]);
 
         $response->assertOk()->assertJsonPath('price', '333000.00');
+    }
+
+    public function test_cannot_edit_scheduled_record_whose_effective_from_has_passed(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        // Bypass createPrice to construct a SCHEDULED record whose
+        // effective_from is in the past (simulates the "no cron" gap).
+        $stale = ServicePrice::create([
+            'service_id' => $service->id,
+            'price' => 444000,
+            'currency_code' => 'VND',
+            'is_tax_inclusive' => true,
+            'effective_from' => Carbon::now()->subDay(),
+            'effective_to' => null,
+            'status' => ServicePrice::STATUS_SCHEDULED,
+            'proposal_status' => ServicePrice::PROPOSAL_APPROVED,
+            'reason' => 'Stale scheduled (effective_from in past)',
+            'approved_at' => Carbon::now()->subDay(),
+        ]);
+
+        $response = $this->putJson("/api/service-prices/{$stale->id}", [
+            'price' => 999999,
+            'effective_from' => Carbon::now()->subDay()->toDateString(),
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_cannot_delete_scheduled_record_whose_effective_from_has_passed(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $stale = ServicePrice::create([
+            'service_id' => $service->id,
+            'price' => 444000,
+            'currency_code' => 'VND',
+            'is_tax_inclusive' => true,
+            'effective_from' => Carbon::now()->subDay(),
+            'effective_to' => null,
+            'status' => ServicePrice::STATUS_SCHEDULED,
+            'proposal_status' => ServicePrice::PROPOSAL_APPROVED,
+            'reason' => 'Stale scheduled (effective_from in past)',
+            'approved_at' => Carbon::now()->subDay(),
+        ]);
+
+        $response = $this->deleteJson("/api/service-prices/{$stale->id}");
+        $response->assertStatus(422);
     }
 
     public function test_e6_cannot_delete_active_record(): void

@@ -87,6 +87,12 @@ class ServicePriceService
                 ->get();
 
             if (! $isProposal && ! $applyNow) {
+                // For a future-dated record, cap any currently-effective open-ended
+                // record at newFrom-1s so it is naturally superseded when the new
+                // record activates. Without this, the open-ended record's range
+                // [from, infinity] always overlaps with the new record.
+                $this->capOpenEndedSupersededRecords($service->id, $effectiveFrom);
+
                 // Apply-now path closes existing active records via endActiveRecordsBefore()
                 // immediately after insert, so we skip the overlap check for that case.
                 // (Scheduled future-dated overlaps for non-apply-now still validated.)
@@ -147,25 +153,33 @@ class ServicePriceService
      */
     public function updatePrice(int $id, array $data, ?User $actor): ServicePrice
     {
-        $record = ServicePrice::findOrFail($id);
-
-        if ($record->status === ServicePrice::STATUS_EXPIRED
-            || ($record->status === ServicePrice::STATUS_ACTIVE
-                && $record->effective_from && $record->effective_from->lessThanOrEqualTo(now()))) {
-            throw ValidationException::withMessages([
-                'id' => 'Khong the chinh sua ban ghi gia da hoac dang co hieu luc (E5).',
-            ]);
-        }
-
-        if ($record->proposal_status === ServicePrice::PROPOSAL_REJECTED) {
-            throw ValidationException::withMessages([
-                'id' => 'Ban ghi de xuat da bi tu choi, khong the chinh sua.',
-            ]);
-        }
-
         $payload = $this->validatePayload($data);
 
-        return DB::transaction(function () use ($record, $payload, $data, $actor) {
+        return DB::transaction(function () use ($id, $payload, $actor) {
+            $record = ServicePrice::query()->lockForUpdate()->findOrFail($id);
+
+            // E5: cannot edit a record that is already serving as the effective
+            // price (active or scheduled-with-effective_from-already-passed) or
+            // that has expired. Approved records that started in the past are
+            // immutable regardless of their `status` column value (no cron
+            // transitions SCHEDULED -> ACTIVE so we must guard on time).
+            $startedAlready = $record->effective_from && $record->effective_from->lessThanOrEqualTo(now());
+            $isApprovedAndStarted = $record->proposal_status === ServicePrice::PROPOSAL_APPROVED
+                && in_array($record->status, [ServicePrice::STATUS_ACTIVE, ServicePrice::STATUS_SCHEDULED], true)
+                && $startedAlready;
+
+            if ($record->status === ServicePrice::STATUS_EXPIRED || $isApprovedAndStarted) {
+                throw ValidationException::withMessages([
+                    'id' => 'Khong the chinh sua ban ghi gia da hoac dang co hieu luc (E5).',
+                ]);
+            }
+
+            if ($record->proposal_status === ServicePrice::PROPOSAL_REJECTED) {
+                throw ValidationException::withMessages([
+                    'id' => 'Ban ghi de xuat da bi tu choi, khong the chinh sua.',
+                ]);
+            }
+
             $effectiveFrom = Carbon::parse($payload['effective_from'])->setTime(0, 0, 0);
             $effectiveTo = $payload['effective_to']
                 ? Carbon::parse($payload['effective_to'])->setTime(23, 59, 59)
@@ -173,12 +187,14 @@ class ServicePriceService
 
             ServicePrice::query()
                 ->where('service_id', $record->service_id)
+                ->where('id', '!=', $record->id)
                 ->whereIn('status', [ServicePrice::STATUS_ACTIVE, ServicePrice::STATUS_SCHEDULED])
                 ->where('proposal_status', ServicePrice::PROPOSAL_APPROVED)
                 ->lockForUpdate()
                 ->get();
 
             if ($record->proposal_status === ServicePrice::PROPOSAL_APPROVED) {
+                $this->capOpenEndedSupersededRecords($record->service_id, $effectiveFrom, $record->id);
                 $this->ensureNoOverlap($record->service_id, $effectiveFrom, $effectiveTo, excludeId: $record->id);
             }
 
@@ -201,28 +217,38 @@ class ServicePriceService
 
     public function deletePrice(int $id, ?User $actor): void
     {
-        $record = ServicePrice::findOrFail($id);
+        DB::transaction(function () use ($id, $actor) {
+            $record = ServicePrice::query()->lockForUpdate()->findOrFail($id);
 
-        if ($record->status === ServicePrice::STATUS_ACTIVE
-            && $record->effective_from && $record->effective_from->lessThanOrEqualTo(now())) {
-            throw ValidationException::withMessages([
-                'id' => 'Khong the xoa ban ghi gia dang co hieu luc (E6).',
+            // E6: cannot delete an approved record that is currently serving as
+            // the effective price. Both ACTIVE and SCHEDULED records whose
+            // effective_from has passed qualify (priceAt() reads both statuses).
+            $startedAlready = $record->effective_from && $record->effective_from->lessThanOrEqualTo(now());
+            $isApprovedAndStarted = $record->proposal_status === ServicePrice::PROPOSAL_APPROVED
+                && in_array($record->status, [ServicePrice::STATUS_ACTIVE, ServicePrice::STATUS_SCHEDULED], true)
+                && $startedAlready;
+
+            if ($isApprovedAndStarted) {
+                throw ValidationException::withMessages([
+                    'id' => 'Khong the xoa ban ghi gia dang co hieu luc (E6).',
+                ]);
+            }
+
+            if ($record->status === ServicePrice::STATUS_EXPIRED) {
+                throw ValidationException::withMessages([
+                    'id' => 'Khong the xoa ban ghi gia da het hieu luc (E6).',
+                ]);
+            }
+
+            $serviceId = $record->service_id;
+            $recordId = $record->id;
+            $record->delete();
+
+            $this->auditLog->log($actor, 'service_price.deleted', [
+                'service_id' => $serviceId,
+                'price_id' => $recordId,
             ]);
-        }
-
-        if ($record->status === ServicePrice::STATUS_EXPIRED) {
-            throw ValidationException::withMessages([
-                'id' => 'Khong the xoa ban ghi gia da het hieu luc (E6).',
-            ]);
-        }
-
-        $serviceId = $record->service_id;
-        $record->delete();
-
-        $this->auditLog->log($actor, 'service_price.deleted', [
-            'service_id' => $serviceId,
-            'price_id' => $id,
-        ]);
+        });
     }
 
     public function approveProposal(int $id, ?User $actor): ServicePrice
@@ -246,14 +272,22 @@ class ServicePriceService
                 ->lockForUpdate()
                 ->get();
 
+            $isImmediate = $record->effective_from->lessThanOrEqualTo(now());
+
+            // For a future-dated proposal, cap any open-ended predecessor so the
+            // overlap check does not falsely reject it. (Immediate approval is
+            // handled below by endActiveRecordsBefore which fully expires the
+            // current active record.)
+            if (! $isImmediate) {
+                $this->capOpenEndedSupersededRecords($record->service_id, $record->effective_from, $record->id);
+            }
+
             $this->ensureNoOverlap(
                 $record->service_id,
                 $record->effective_from,
                 $record->effective_to,
                 excludeId: $record->id
             );
-
-            $isImmediate = $record->effective_from->lessThanOrEqualTo(now());
 
             $record->fill([
                 'proposal_status' => ServicePrice::PROPOSAL_APPROVED,
@@ -532,6 +566,41 @@ class ServicePriceService
             'effective_to' => $data['effective_to'] ?? null,
             'reason' => $data['reason'] ?? null,
         ];
+    }
+
+    /**
+     * Cap any currently-effective approved record (i.e. one that has already
+     * started, effective_from <= now) so that it naturally ends just before
+     * $newFrom. Used when scheduling a future-dated record so its range does
+     * not collide with an open-ended predecessor in ensureNoOverlap.
+     *
+     * Only currently-effective records are capped — future scheduled records
+     * (effective_from > now) are NOT touched, because two future scheduled
+     * records starting in the same window are a real conflict that should be
+     * detected by ensureNoOverlap.
+     */
+    private function capOpenEndedSupersededRecords(int $serviceId, CarbonInterface $newFrom, ?int $excludeId = null): void
+    {
+        $now = now();
+        $boundary = $newFrom->copy()->subSecond();
+
+        $q = ServicePrice::query()
+            ->where('service_id', $serviceId)
+            ->where('proposal_status', ServicePrice::PROPOSAL_APPROVED)
+            ->whereIn('status', [ServicePrice::STATUS_ACTIVE, ServicePrice::STATUS_SCHEDULED])
+            ->where('effective_from', '<=', $now)
+            ->where('effective_from', '<', $newFrom)
+            ->where(function (Builder $sub) use ($newFrom) {
+                // Open-ended OR ends after newFrom (records ending before
+                // newFrom are already non-overlapping; leave them alone).
+                $sub->whereNull('effective_to')->orWhere('effective_to', '>=', $newFrom);
+            });
+
+        if ($excludeId) {
+            $q->where('id', '!=', $excludeId);
+        }
+
+        $q->update(['effective_to' => $boundary]);
     }
 
     /**
