@@ -8,6 +8,7 @@ use App\Models\Service;
 use App\Models\ServiceAttachment;
 use App\Models\ServicePriceHistory;
 use App\Models\ServiceStatusHistory;
+use App\Services\ServicePriceService;
 use App\Models\Specialty;
 use App\Models\Staff;
 use App\Models\User;
@@ -19,8 +20,10 @@ use Illuminate\Validation\ValidationException;
 
 class ServiceCatalogService
 {
-    public function __construct(private readonly AuditLogService $auditLog)
-    {
+    public function __construct(
+        private readonly AuditLogService $auditLog,
+        private readonly ServicePriceService $servicePriceService,
+    ) {
     }
 
     public function listServices(array $filters): LengthAwarePaginator
@@ -105,6 +108,8 @@ class ServiceCatalogService
 
             $this->syncSpecialties($service, $specialties);
 
+            // UC4.3: keep service_price_history for backward-compat audit, and
+            // delegate to ServicePriceService to create the canonical service_prices record.
             ServicePriceHistory::create([
                 'service_id' => $service->id,
                 'old_price' => null,
@@ -114,6 +119,12 @@ class ServiceCatalogService
                 'changed_by' => $actor?->id,
                 'created_at' => now(),
             ]);
+
+            $this->servicePriceService->createInitialPrice(
+                $service,
+                (float) ($payload['price'] ?? 0),
+                $actor
+            );
 
             ServiceStatusHistory::create([
                 'service_id' => $service->id,
@@ -167,6 +178,7 @@ class ServiceCatalogService
             $this->syncSpecialties($service, $specialties);
 
             if (array_key_exists('price', $payload) && (float) $payload['price'] !== $oldPrice) {
+                // Backward-compat audit row.
                 ServicePriceHistory::create([
                     'service_id' => $service->id,
                     'old_price' => $oldPrice,
@@ -176,6 +188,24 @@ class ServiceCatalogService
                     'changed_by' => $actor?->id,
                     'created_at' => now(),
                 ]);
+
+                // UC4.3: route price change through ServicePriceService so the canonical
+                // service_prices table stays in sync. Effective from now, immediate.
+                try {
+                    $this->servicePriceService->createPrice(
+                        $service->id,
+                        [
+                            'price' => $payload['price'],
+                            'apply_now' => true,
+                            'effective_from' => now()->toDateString(),
+                            'reason' => $data['price_reason'] ?? 'Cap nhat gia tu UC4.1',
+                        ],
+                        $actor,
+                        isProposal: false
+                    );
+                } catch (\Throwable $e) {
+                    // Service price recording is best-effort here; UC4.1 main flow continues.
+                }
             }
 
             if (! empty($payload['status']) && $payload['status'] !== $oldStatus) {

@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\ProfessionalProfileController;
 use App\Http\Controllers\Api\ServiceAttachmentController;
 use App\Http\Controllers\Api\ServiceCatalogController;
 use App\Http\Controllers\Api\ServicePackageController;
+use App\Http\Controllers\Api\ServicePriceController;
 use App\Http\Controllers\Api\ShiftSwapRequestController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\PermissionController;
@@ -127,6 +128,27 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/service-packages/{package}/new-version', [ServicePackageController::class, 'newVersion'])->whereNumber('package');
         Route::delete('/service-packages/{package}', [ServicePackageController::class, 'destroy'])->whereNumber('package');
         Route::get('/service-packages/audit-logs', [ServicePackageController::class, 'auditLogs']);
+    });
+
+    // Service Prices (UC4.3)
+    Route::middleware('permission:prices.view')->group(function () {
+        Route::get('/service-prices', [ServicePriceController::class, 'index']);
+        Route::get('/service-prices/pending', [ServicePriceController::class, 'pending']);
+        Route::get('/service-prices/audit-logs', [ServicePriceController::class, 'auditLogs']);
+        Route::get('/service-prices/services/{service}/timeline', [ServicePriceController::class, 'timeline'])->whereNumber('service');
+    });
+    Route::middleware('permission:prices.create')->group(function () {
+        Route::post('/service-prices', [ServicePriceController::class, 'store']);
+    });
+    Route::middleware('permission:prices.edit')->group(function () {
+        Route::put('/service-prices/{price}', [ServicePriceController::class, 'update'])->whereNumber('price');
+    });
+    Route::middleware('permission:prices.delete')->group(function () {
+        Route::delete('/service-prices/{price}', [ServicePriceController::class, 'destroy'])->whereNumber('price');
+    });
+    Route::middleware('permission:prices.approve')->group(function () {
+        Route::post('/service-prices/{price}/approve', [ServicePriceController::class, 'approve'])->whereNumber('price');
+        Route::post('/service-prices/{price}/reject', [ServicePriceController::class, 'reject'])->whereNumber('price');
     });
 
     // Service Package - read-only for any authenticated user; controller scopes for benh_nhan

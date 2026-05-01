@@ -19,6 +19,7 @@ import StaffManagement from '@/page/StaffManagement';
 import ProfessionalProfileManagement from '@/page/ProfessionalProfileManagement';
 import ServiceCatalogManagement from '@/page/ServiceCatalogManagement';
 import ServicePackageManagement from '@/page/ServicePackageManagement';
+import ServicePriceManagement from '@/page/ServicePriceManagement';
 import SystemSettings from '@/page/SystemSettings';
 import PatientList from '@/page/PatientList';
 import Appointments from '@/page/Appointments';
@@ -83,6 +84,7 @@ const AppRouter = () => {
         <Route path="professional-profiles" element={<PermissionRoute permission="professional_profiles.view"><ProfessionalProfileManagement /></PermissionRoute>} />
         <Route path="services" element={<PermissionRoute permission="services.view"><ServiceCatalogManagement /></PermissionRoute>} />
         <Route path="service-packages" element={<PermissionRoute permission="packages.view"><ServicePackageManagement /></PermissionRoute>} />
+        <Route path="service-prices" element={<PermissionRoute permission="prices.view"><ServicePriceManagement /></PermissionRoute>} />
         <Route path="settings" element={<PermissionRoute><SystemSettings /></PermissionRoute>} />
 
         <Route path="patients" element={<PermissionRoute permission="patients.view"><PatientList /></PermissionRoute>} />

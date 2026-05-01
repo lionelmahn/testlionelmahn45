@@ -23,6 +23,7 @@ class PermissionSeeder extends Seeder
             'finance' => 'Tai chinh',
             'reports' => 'Bao cao',
             'schedules' => 'Lich lam viec',
+            'prices' => 'Bang gia dich vu',
         ];
 
         $actions = [
@@ -63,6 +64,26 @@ class PermissionSeeder extends Seeder
                 if ($role) {
                     $role->permissions()->syncWithoutDetaching($sharedView);
                 }
+            }
+        }
+
+        // Grant prices.view to internal staff so they can read pricing.
+        $pricesView = Permission::where('slug', 'prices.view')->value('id');
+        if ($pricesView) {
+            foreach (['bac_si', 'le_tan', 'ke_toan'] as $slug) {
+                $role = Role::where('slug', $slug)->first();
+                if ($role) {
+                    $role->permissions()->syncWithoutDetaching([$pricesView]);
+                }
+            }
+        }
+
+        // Accountant can propose new prices (Admin still approves).
+        $accountantExtra = Permission::whereIn('slug', ['prices.create', 'prices.edit'])->pluck('id')->all();
+        if (! empty($accountantExtra)) {
+            $accountant = Role::where('slug', 'ke_toan')->first();
+            if ($accountant) {
+                $accountant->permissions()->syncWithoutDetaching($accountantExtra);
             }
         }
     }

@@ -78,6 +78,19 @@ class Service extends Model
         return $this->hasMany(ServicePriceHistory::class)->orderByDesc('created_at');
     }
 
+    public function prices(): HasMany
+    {
+        return $this->hasMany(ServicePrice::class)->orderByDesc('effective_from');
+    }
+
+    public function activePrice()
+    {
+        return $this->hasOne(ServicePrice::class)
+            ->where('status', ServicePrice::STATUS_ACTIVE)
+            ->where('proposal_status', ServicePrice::PROPOSAL_APPROVED)
+            ->orderByDesc('effective_from');
+    }
+
     public function statusHistory(): HasMany
     {
         return $this->hasMany(ServiceStatusHistory::class)->orderByDesc('created_at');
