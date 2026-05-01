@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\ProfessionalProfileController;
 use App\Http\Controllers\Api\ServiceAttachmentController;
 use App\Http\Controllers\Api\ServiceCatalogController;
+use App\Http\Controllers\Api\ServicePackageController;
 use App\Http\Controllers\Api\ShiftSwapRequestController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\PermissionController;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\Route;
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/public/services', [ServiceCatalogController::class, 'publicIndex']);
 Route::get('/public/service-groups', [ServiceCatalogController::class, 'groups']);
+Route::get('/public/service-packages', [ServicePackageController::class, 'publicIndex']);
 Route::post('/verify-login-otp', [AuthController::class, 'verifyLoginOtp']);
 Route::post('/auth/google', [AuthController::class, 'googleLogin']);
 
@@ -116,7 +118,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/shift-swap-requests', [ShiftSwapRequestController::class, 'index']);
         Route::post('/shift-swap-requests/{swap}/approve', [ShiftSwapRequestController::class, 'approve'])->whereNumber('swap');
         Route::post('/shift-swap-requests/{swap}/reject', [ShiftSwapRequestController::class, 'reject'])->whereNumber('swap');
+
+        // Service Package (UC4.2)
+        Route::post('/service-packages', [ServicePackageController::class, 'store']);
+        Route::put('/service-packages/{package}', [ServicePackageController::class, 'update'])->whereNumber('package');
+        Route::post('/service-packages/{package}/status', [ServicePackageController::class, 'changeStatus'])->whereNumber('package');
+        Route::post('/service-packages/{package}/clone', [ServicePackageController::class, 'clone'])->whereNumber('package');
+        Route::post('/service-packages/{package}/new-version', [ServicePackageController::class, 'newVersion'])->whereNumber('package');
+        Route::delete('/service-packages/{package}', [ServicePackageController::class, 'destroy'])->whereNumber('package');
+        Route::get('/service-packages/audit-logs', [ServicePackageController::class, 'auditLogs']);
     });
+
+    // Service Package - read-only for any authenticated user; controller scopes for benh_nhan
+    Route::get('/service-packages', [ServicePackageController::class, 'index']);
+    Route::get('/service-packages/{package}', [ServicePackageController::class, 'show'])->whereNumber('package');
+    Route::get('/service-packages/{package}/discontinued-warnings', [ServicePackageController::class, 'discontinuedWarnings'])->whereNumber('package');
 
     // Service catalog (read for any authenticated user, scope filter applied in service)
     Route::get('/services', [ServiceCatalogController::class, 'index']);

@@ -38,6 +38,7 @@ const MainLayout = () => {
     { icon: <Users size={20} />, label: 'Quan ly nhan su', path: '/staff', roles: ['admin'], permission: 'staff.view' },
     { icon: <BriefcaseMedical size={20} />, label: 'Ho so chuyen mon', path: '/professional-profiles', roles: ['admin'], permission: 'professional_profiles.view' },
     { icon: <ClipboardList size={20} />, label: 'Dich vu nha khoa', path: '/services', roles: ['admin', 'bac_si', 'le_tan', 'ke_toan', 'benh_nhan'], permission: 'services.view' },
+    { icon: <ClipboardList size={20} />, label: 'Goi dich vu', path: '/service-packages', roles: ['admin', 'bac_si', 'le_tan', 'ke_toan', 'benh_nhan'], permission: 'packages.view' },
     { icon: <Settings size={20} />, label: 'Cai dat he thong', path: '/settings', roles: ['admin'] },
     { icon: <Users size={20} />, label: 'Danh sach benh nhan', path: '/patients', roles: ['admin', 'bac_si', 'le_tan'], permission: 'patients.view' },
     { icon: <Calendar size={20} />, label: 'Lich hen phong kham', path: '/appointments', roles: ['admin', 'bac_si', 'le_tan'], permission: 'appointments.view' },
