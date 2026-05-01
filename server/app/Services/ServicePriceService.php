@@ -86,7 +86,10 @@ class ServicePriceService
                 ->lockForUpdate()
                 ->get();
 
-            if (! $isProposal) {
+            if (! $isProposal && ! $applyNow) {
+                // Apply-now path closes existing active records via endActiveRecordsBefore()
+                // immediately after insert, so we skip the overlap check for that case.
+                // (Scheduled future-dated overlaps for non-apply-now still validated.)
                 $this->ensureNoOverlap($service->id, $effectiveFrom, $effectiveTo);
             }
 

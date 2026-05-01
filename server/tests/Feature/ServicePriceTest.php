@@ -25,6 +25,34 @@ class ServicePriceTest extends TestCase
         $this->seed(RoleSeeder::class);
         $this->seed(PermissionSeeder::class);
         $this->seed(ServiceSeeder::class);
+        $this->seedInitialActivePrices();
+    }
+
+    /**
+     * ServiceSeeder creates services via firstOrCreate (does not go through
+     * ServiceCatalogService), so no service_prices records exist. Seed one
+     * active record per service so tests cover the realistic state.
+     */
+    private function seedInitialActivePrices(): void
+    {
+        $now = now();
+        foreach (Service::all() as $service) {
+            if (ServicePrice::where('service_id', $service->id)->exists()) {
+                continue;
+            }
+            ServicePrice::create([
+                'service_id' => $service->id,
+                'price' => $service->price ?: 100000,
+                'currency_code' => 'VND',
+                'is_tax_inclusive' => true,
+                'effective_from' => $service->created_at ?? $now,
+                'effective_to' => null,
+                'status' => ServicePrice::STATUS_ACTIVE,
+                'proposal_status' => ServicePrice::PROPOSAL_APPROVED,
+                'reason' => 'Test fixture initial price',
+                'approved_at' => $now,
+            ]);
+        }
     }
 
     public function test_initial_price_is_created_when_service_is_created(): void

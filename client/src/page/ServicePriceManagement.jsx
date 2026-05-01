@@ -104,7 +104,7 @@ const ServicePriceManagement = () => {
         await servicePriceApi.create(payload);
       }
       setFormOpen(false);
-      await Promise.all([refetch(), loadTimeline(selectedService.id)]);
+      await Promise.all([refetch(), loadTimeline(selectedService?.id)]);
     } catch (err) {
       setFormError(extractError(err, 'Lưu giá thất bại.'));
     } finally {
@@ -116,7 +116,7 @@ const ServicePriceManagement = () => {
     if (!window.confirm('Bạn có chắc muốn xoá bản ghi giá này?')) return;
     try {
       await servicePriceApi.remove(record.id);
-      await Promise.all([refetch(), loadTimeline(selectedService.id)]);
+      await Promise.all([refetch(), loadTimeline(selectedService?.id)]);
     } catch (err) {
       window.alert(extractError(err, 'Xoá thất bại.'));
     }
@@ -125,7 +125,7 @@ const ServicePriceManagement = () => {
   const handleApprove = async (record) => {
     try {
       await servicePriceApi.approve(record.id);
-      await Promise.all([refetch(), loadTimeline(selectedService.id)]);
+      await Promise.all([refetch(), loadTimeline(selectedService?.id)]);
     } catch (err) {
       window.alert(extractError(err, 'Duyệt thất bại.'));
     }
@@ -143,7 +143,7 @@ const ServicePriceManagement = () => {
     try {
       await servicePriceApi.reject(rejectModal.record.id, reason);
       setRejectModal({ open: false, record: null });
-      await Promise.all([refetch(), loadTimeline(selectedService.id)]);
+      await Promise.all([refetch(), loadTimeline(selectedService?.id)]);
     } catch (err) {
       setRejectError(extractError(err, 'Từ chối thất bại.'));
     } finally {
