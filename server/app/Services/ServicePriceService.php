@@ -274,20 +274,22 @@ class ServicePriceService
 
             $isImmediate = $record->effective_from->lessThanOrEqualTo(now());
 
-            // For a future-dated proposal, cap any open-ended predecessor so the
-            // overlap check does not falsely reject it. (Immediate approval is
-            // handled below by endActiveRecordsBefore which fully expires the
-            // current active record.)
+            // Immediate approval: endActiveRecordsBefore (called after the
+            // record is updated below) will expire/cancel any conflicting
+            // active+scheduled records, so we skip the overlap check —
+            // mirroring how createPrice handles the apply-now path.
+            // Future-dated approval: cap any currently-effective open-ended
+            // predecessor before the overlap check so it does not falsely
+            // reject the proposal.
             if (! $isImmediate) {
                 $this->capOpenEndedSupersededRecords($record->service_id, $record->effective_from, $record->id);
+                $this->ensureNoOverlap(
+                    $record->service_id,
+                    $record->effective_from,
+                    $record->effective_to,
+                    excludeId: $record->id
+                );
             }
-
-            $this->ensureNoOverlap(
-                $record->service_id,
-                $record->effective_from,
-                $record->effective_to,
-                excludeId: $record->id
-            );
 
             $record->fill([
                 'proposal_status' => ServicePrice::PROPOSAL_APPROVED,

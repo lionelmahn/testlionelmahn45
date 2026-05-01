@@ -395,6 +395,39 @@ class ServicePriceTest extends TestCase
         $this->assertSame('approved', $approved['proposal_status']);
     }
 
+    public function test_a1_admin_approves_immediate_proposal_supersedes_active_record(): void
+    {
+        $accountant = $this->createUser('ke_toan');
+        Sanctum::actingAs($accountant);
+
+        $service = Service::first();
+        $existing = ServicePrice::where('service_id', $service->id)
+            ->where('status', ServicePrice::STATUS_ACTIVE)
+            ->whereNull('effective_to')
+            ->firstOrFail();
+
+        // Proposal with effective_from = today (immediate when approved).
+        $proposal = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 850000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->toDateString(),
+            'reason' => 'De xuat ap dung ngay hom nay',
+        ])->assertCreated()->json();
+
+        Sanctum::actingAs($this->createUser('admin'));
+        $approved = $this->postJson("/api/service-prices/{$proposal['id']}/approve")
+            ->assertOk()
+            ->json();
+
+        $this->assertSame('approved', $approved['proposal_status']);
+        $this->assertSame('active', $approved['status']);
+
+        $existing->refresh();
+        $this->assertSame(ServicePrice::STATUS_EXPIRED, $existing->status,
+            'Open-ended active record must be expired after immediate proposal approval.');
+    }
+
     public function test_a1_admin_can_reject_proposal(): void
     {
         $accountant = $this->createUser('ke_toan');
