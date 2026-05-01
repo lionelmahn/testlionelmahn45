@@ -118,6 +118,41 @@ class ServicePriceTest extends TestCase
         $this->assertEqualsWithDelta(999000, (float) $newActive->price, 0.01);
     }
 
+    public function test_apply_now_cancels_open_ended_scheduled_record_within_range(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        // Pre-create a scheduled record starting next month, open-ended.
+        $scheduled = ServicePrice::create([
+            'service_id' => $service->id,
+            'price' => 700000,
+            'currency_code' => 'VND',
+            'is_tax_inclusive' => true,
+            'effective_from' => Carbon::now()->addMonth(),
+            'effective_to' => null,
+            'status' => ServicePrice::STATUS_SCHEDULED,
+            'proposal_status' => ServicePrice::PROPOSAL_APPROVED,
+            'reason' => 'Pre-existing scheduled',
+        ]);
+
+        // Apply-now with open-ended new active record -> the scheduled future
+        // record falls within [now, infinity] so it must be cancelled.
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 999000,
+            'apply_now' => true,
+            'reason' => 'Apply now overrides scheduled',
+        ]);
+
+        $response->assertCreated();
+        $this->assertSame(
+            ServicePrice::STATUS_CANCELLED,
+            ServicePrice::find($scheduled->id)->status,
+            'Scheduled record overlapping the apply-now range should be cancelled.'
+        );
+    }
+
     public function test_admin_create_future_price_is_scheduled(): void
     {
         Sanctum::actingAs($this->createUser('admin'));

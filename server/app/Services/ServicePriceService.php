@@ -120,7 +120,7 @@ class ServicePriceService
             ]);
 
             if (! $isProposal && $applyNow) {
-                $this->endActiveRecordsBefore($service->id, $effectiveFrom, $record->id);
+                $this->endActiveRecordsBefore($service->id, $effectiveFrom, $record->id, $effectiveTo);
                 $this->syncServicePriceCache($service->fresh());
             } elseif (! $isProposal && $status === ServicePrice::STATUS_ACTIVE) {
                 $this->syncServicePriceCache($service->fresh());
@@ -227,17 +227,20 @@ class ServicePriceService
 
     public function approveProposal(int $id, ?User $actor): ServicePrice
     {
-        $record = ServicePrice::findOrFail($id);
+        return DB::transaction(function () use ($id, $actor) {
+            // Lock the proposal row itself first so a concurrent approve/reject
+            // cannot race against the pending check.
+            $record = ServicePrice::query()->lockForUpdate()->findOrFail($id);
 
-        if ($record->proposal_status !== ServicePrice::PROPOSAL_PENDING) {
-            throw ValidationException::withMessages([
-                'id' => 'Chi co the duyet de xuat dang cho duyet.',
-            ]);
-        }
+            if ($record->proposal_status !== ServicePrice::PROPOSAL_PENDING) {
+                throw ValidationException::withMessages([
+                    'id' => 'Chi co the duyet de xuat dang cho duyet.',
+                ]);
+            }
 
-        return DB::transaction(function () use ($record, $actor) {
             ServicePrice::query()
                 ->where('service_id', $record->service_id)
+                ->where('id', '!=', $record->id)
                 ->whereIn('status', [ServicePrice::STATUS_ACTIVE, ServicePrice::STATUS_SCHEDULED])
                 ->where('proposal_status', ServicePrice::PROPOSAL_APPROVED)
                 ->lockForUpdate()
@@ -260,7 +263,7 @@ class ServicePriceService
             ])->save();
 
             if ($isImmediate) {
-                $this->endActiveRecordsBefore($record->service_id, $record->effective_from, $record->id);
+                $this->endActiveRecordsBefore($record->service_id, $record->effective_from, $record->id, $record->effective_to);
                 $this->syncServicePriceCache($record->service);
             }
 
@@ -275,29 +278,31 @@ class ServicePriceService
 
     public function rejectProposal(int $id, ?string $reason, ?User $actor): ServicePrice
     {
-        $record = ServicePrice::findOrFail($id);
+        return DB::transaction(function () use ($id, $reason, $actor) {
+            $record = ServicePrice::query()->lockForUpdate()->findOrFail($id);
 
-        if ($record->proposal_status !== ServicePrice::PROPOSAL_PENDING) {
-            throw ValidationException::withMessages([
-                'id' => 'Chi co the tu choi de xuat dang cho duyet.',
+            if ($record->proposal_status !== ServicePrice::PROPOSAL_PENDING) {
+                throw ValidationException::withMessages([
+                    'id' => 'Chi co the tu choi de xuat dang cho duyet.',
+                ]);
+            }
+
+            $record->fill([
+                'proposal_status' => ServicePrice::PROPOSAL_REJECTED,
+                'status' => ServicePrice::STATUS_CANCELLED,
+                'rejected_reason' => $reason,
+                'approved_by' => $actor?->id,
+                'approved_at' => now(),
+            ])->save();
+
+            $this->auditLog->log($actor, 'service_price.rejected', [
+                'service_id' => $record->service_id,
+                'price_id' => $record->id,
+                'reason' => $reason,
             ]);
-        }
 
-        $record->fill([
-            'proposal_status' => ServicePrice::PROPOSAL_REJECTED,
-            'status' => ServicePrice::STATUS_CANCELLED,
-            'rejected_reason' => $reason,
-            'approved_by' => $actor?->id,
-            'approved_at' => now(),
-        ])->save();
-
-        $this->auditLog->log($actor, 'service_price.rejected', [
-            'service_id' => $record->service_id,
-            'price_id' => $record->id,
-            'reason' => $reason,
-        ]);
-
-        return $record->fresh(['service:id,service_code,name', 'proposer:id,name', 'approver:id,name']);
+            return $record->fresh(['service:id,service_code,name', 'proposer:id,name', 'approver:id,name']);
+        });
     }
 
     /**
@@ -530,10 +535,15 @@ class ServicePriceService
     }
 
     /**
-     * When a new active record is created, end any prior active records by setting
-     * their effective_to = newFrom - 1 second and status = expired.
+     * When a new active record [newFrom, newTo] is created (apply-now or
+     * approving an immediate proposal), supersede prior records:
+     *   - Active records (currently in effect) -> expire at newFrom - 1s.
+     *   - Scheduled records whose effective_from is within [newFrom, newTo]
+     *     -> cancel (they are made redundant by the new active record's range).
+     *
+     * Scheduled records strictly after newTo (when newTo is bounded) are kept.
      */
-    private function endActiveRecordsBefore(int $serviceId, CarbonInterface $newFrom, int $excludeId): void
+    private function endActiveRecordsBefore(int $serviceId, CarbonInterface $newFrom, int $excludeId, ?CarbonInterface $newTo = null): void
     {
         $boundary = $newFrom->copy()->subSecond();
 
@@ -546,6 +556,21 @@ class ServicePriceService
                 'effective_to' => $boundary,
                 'status' => ServicePrice::STATUS_EXPIRED,
             ]);
+
+        $scheduledQuery = ServicePrice::query()
+            ->where('service_id', $serviceId)
+            ->where('id', '!=', $excludeId)
+            ->where('proposal_status', ServicePrice::PROPOSAL_APPROVED)
+            ->where('status', ServicePrice::STATUS_SCHEDULED)
+            ->where('effective_from', '>=', $newFrom);
+
+        if ($newTo !== null) {
+            $scheduledQuery->where('effective_from', '<=', $newTo);
+        }
+
+        $scheduledQuery->update([
+            'status' => ServicePrice::STATUS_CANCELLED,
+        ]);
     }
 
     /**
