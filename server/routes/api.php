@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\ServiceCatalogController;
 use App\Http\Controllers\Api\ServicePackageController;
 use App\Http\Controllers\Api\ServicePriceController;
 use App\Http\Controllers\Api\ShiftSwapRequestController;
+use App\Http\Controllers\Api\ToothStatusController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\WorkScheduleController;
@@ -164,4 +165,34 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/services/{service}/attachments', [ServiceAttachmentController::class, 'index'])->whereNumber('service');
     Route::get('/services/{service}/attachments/{attachment}/download', [ServiceAttachmentController::class, 'download'])
         ->whereNumber('service')->whereNumber('attachment');
+
+    // Tooth Status Management (UC4.4)
+    Route::middleware('permission:tooth_statuses.view')->group(function () {
+        Route::get('/tooth-statuses', [ToothStatusController::class, 'index']);
+        Route::get('/tooth-status-groups', [ToothStatusController::class, 'groups']);
+        Route::get('/tooth-statuses/history/recent', [ToothStatusController::class, 'recentHistory']);
+        Route::get('/tooth-statuses/{tooth}', [ToothStatusController::class, 'show'])->whereNumber('tooth');
+        Route::get('/tooth-statuses/{tooth}/history', [ToothStatusController::class, 'history'])->whereNumber('tooth');
+    });
+
+    // Doctors propose new/updated tooth statuses (A1) — admin still approves.
+    Route::middleware('role:bac_si')->group(function () {
+        Route::post('/tooth-status-proposals', [ToothStatusController::class, 'storeProposal']);
+    });
+
+    // Admin-only mutations on the master data + proposal review.
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/tooth-statuses', [ToothStatusController::class, 'store']);
+        Route::put('/tooth-statuses/{tooth}', [ToothStatusController::class, 'update'])->whereNumber('tooth');
+        Route::post('/tooth-statuses/{tooth}/toggle-active', [ToothStatusController::class, 'toggleActive'])->whereNumber('tooth');
+        Route::delete('/tooth-statuses/{tooth}', [ToothStatusController::class, 'destroy'])->whereNumber('tooth');
+        Route::post('/tooth-statuses/reorder', [ToothStatusController::class, 'reorder']);
+
+        Route::post('/tooth-status-groups', [ToothStatusController::class, 'storeGroup']);
+        Route::put('/tooth-status-groups/{group}', [ToothStatusController::class, 'updateGroup'])->whereNumber('group');
+
+        Route::get('/tooth-status-proposals', [ToothStatusController::class, 'listProposals']);
+        Route::post('/tooth-status-proposals/{proposal}/approve', [ToothStatusController::class, 'approveProposal'])->whereNumber('proposal');
+        Route::post('/tooth-status-proposals/{proposal}/reject', [ToothStatusController::class, 'rejectProposal'])->whereNumber('proposal');
+    });
 });
