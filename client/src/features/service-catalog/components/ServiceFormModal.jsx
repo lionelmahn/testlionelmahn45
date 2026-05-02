@@ -149,14 +149,31 @@ const ServiceFormModal = ({
           {step === 1 && (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="text-gray-500 mb-1 block">Giá (đ)</label>
+                <label className="text-gray-500 mb-1 block">
+                  Giá (đ)
+                  {isEdit && (
+                    <span className="ml-2 text-[10px] font-normal text-gray-400">
+                      (chỉ đọc — quản lý tại Bảng giá)
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   min={0}
                   value={form.price}
                   onChange={setField('price')}
-                  className="w-full border rounded px-2 py-1.5"
+                  readOnly={isEdit}
+                  disabled={isEdit}
+                  className={`w-full border rounded px-2 py-1.5 ${isEdit ? 'cursor-not-allowed bg-gray-100 text-gray-600' : ''}`}
                 />
+                {isEdit && (
+                  <a
+                    href="/service-prices"
+                    className="mt-1 inline-block text-[10px] font-medium text-blue-600 hover:underline"
+                  >
+                    → Quản lý lịch sử giá tại Bảng giá dịch vụ
+                  </a>
+                )}
               </div>
               <div>
                 <label className="text-gray-500 mb-1 block">Thời lượng (phút)</label>

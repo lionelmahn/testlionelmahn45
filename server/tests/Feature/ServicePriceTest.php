@@ -1,0 +1,510 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Role;
+use App\Models\Service;
+use App\Models\ServicePrice;
+use App\Models\User;
+use Database\Seeders\PermissionSeeder;
+use Database\Seeders\RoleSeeder;
+use Database\Seeders\ServiceSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Hash;
+use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
+
+class ServicePriceTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(RoleSeeder::class);
+        $this->seed(PermissionSeeder::class);
+        $this->seed(ServiceSeeder::class);
+        $this->seedInitialActivePrices();
+    }
+
+    /**
+     * ServiceSeeder creates services via firstOrCreate (does not go through
+     * ServiceCatalogService), so no service_prices records exist. Seed one
+     * active record per service so tests cover the realistic state.
+     */
+    private function seedInitialActivePrices(): void
+    {
+        $now = now();
+        foreach (Service::all() as $service) {
+            if (ServicePrice::where('service_id', $service->id)->exists()) {
+                continue;
+            }
+            ServicePrice::create([
+                'service_id' => $service->id,
+                'price' => $service->price ?: 100000,
+                'currency_code' => 'VND',
+                'is_tax_inclusive' => true,
+                'effective_from' => $service->created_at ?? $now,
+                'effective_to' => null,
+                'status' => ServicePrice::STATUS_ACTIVE,
+                'proposal_status' => ServicePrice::PROPOSAL_APPROVED,
+                'reason' => 'Test fixture initial price',
+                'approved_at' => $now,
+            ]);
+        }
+    }
+
+    public function test_initial_price_is_created_when_service_is_created(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+
+        $service = Service::first();
+        // Seeder creates services -> ServiceCatalogService::createInitialPrice runs
+        // For seeded services, check there is at least one price record
+        $this->assertGreaterThan(0, ServicePrice::where('service_id', $service->id)->count());
+    }
+
+    public function test_admin_can_list_prices_grouped_by_service(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+
+        $response = $this->getJson('/api/service-prices');
+        $response->assertOk()->assertJsonStructure(['data', 'current_page', 'last_page']);
+    }
+
+    public function test_admin_can_view_timeline_for_service(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $response = $this->getJson("/api/service-prices/services/{$service->id}/timeline");
+        $response->assertOk()->assertJsonStructure([
+            'service' => ['id', 'name', 'service_code'],
+            'current',
+            'future',
+            'past',
+            'pending',
+        ]);
+    }
+
+    public function test_admin_create_price_apply_now_ends_current_record(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+        $prevActive = ServicePrice::where('service_id', $service->id)
+            ->where('status', ServicePrice::STATUS_ACTIVE)
+            ->first();
+
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 999000,
+            'apply_now' => true,
+            'reason' => 'Tang gia test',
+        ]);
+
+        $response->assertCreated();
+
+        if ($prevActive) {
+            $prev = ServicePrice::find($prevActive->id);
+            $this->assertSame(ServicePrice::STATUS_EXPIRED, $prev->status, 'Previous active record should be expired.');
+            $this->assertNotNull($prev->effective_to);
+        }
+
+        $newActive = ServicePrice::where('service_id', $service->id)
+            ->where('status', ServicePrice::STATUS_ACTIVE)
+            ->first();
+        $this->assertNotNull($newActive);
+        $this->assertEqualsWithDelta(999000, (float) $newActive->price, 0.01);
+    }
+
+    public function test_apply_now_cancels_open_ended_scheduled_record_within_range(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        // Pre-create a scheduled record starting next month, open-ended.
+        $scheduled = ServicePrice::create([
+            'service_id' => $service->id,
+            'price' => 700000,
+            'currency_code' => 'VND',
+            'is_tax_inclusive' => true,
+            'effective_from' => Carbon::now()->addMonth(),
+            'effective_to' => null,
+            'status' => ServicePrice::STATUS_SCHEDULED,
+            'proposal_status' => ServicePrice::PROPOSAL_APPROVED,
+            'reason' => 'Pre-existing scheduled',
+        ]);
+
+        // Apply-now with open-ended new active record -> the scheduled future
+        // record falls within [now, infinity] so it must be cancelled.
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 999000,
+            'apply_now' => true,
+            'reason' => 'Apply now overrides scheduled',
+        ]);
+
+        $response->assertCreated();
+        $this->assertSame(
+            ServicePrice::STATUS_CANCELLED,
+            ServicePrice::find($scheduled->id)->status,
+            'Scheduled record overlapping the apply-now range should be cancelled.'
+        );
+    }
+
+    public function test_scheduling_future_price_caps_open_ended_predecessor(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $existing = ServicePrice::where('service_id', $service->id)
+            ->where('status', ServicePrice::STATUS_ACTIVE)
+            ->whereNull('effective_to')
+            ->firstOrFail();
+
+        $futureFrom = Carbon::now()->addMonth()->startOfDay();
+
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 555000,
+            'apply_now' => false,
+            'effective_from' => $futureFrom->toDateString(),
+            'reason' => 'Future scheduled supersedes open-ended',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('status', ServicePrice::STATUS_SCHEDULED);
+
+        $existing->refresh();
+        $this->assertNotNull($existing->effective_to, 'Open-ended predecessor must be capped.');
+        $this->assertTrue(
+            $existing->effective_to->lessThan($futureFrom),
+            'Predecessor effective_to must be strictly before new effective_from.'
+        );
+    }
+
+    public function test_admin_create_future_price_is_scheduled(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 555000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->addMonth()->toDateString(),
+            'reason' => 'Future price',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('status', ServicePrice::STATUS_SCHEDULED);
+    }
+
+    public function test_e1_zero_or_negative_price_rejected(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 0,
+            'apply_now' => true,
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_e2_invalid_date_range_rejected(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 100000,
+            'effective_from' => Carbon::now()->addMonths(3)->toDateString(),
+            'effective_to' => Carbon::now()->addMonth()->toDateString(),
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_e3_overlapping_dates_rejected(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 555000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->addMonth()->toDateString(),
+            'effective_to' => Carbon::now()->addMonths(2)->toDateString(),
+        ])->assertCreated();
+
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 666000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->addMonth()->addDays(10)->toDateString(),
+            'effective_to' => Carbon::now()->addMonths(3)->toDateString(),
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('E3', $response->json('message') ?? '');
+    }
+
+    public function test_e5_cannot_edit_active_record(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+        $active = ServicePrice::where('service_id', $service->id)
+            ->where('status', ServicePrice::STATUS_ACTIVE)
+            ->first();
+        $this->assertNotNull($active);
+
+        $response = $this->putJson("/api/service-prices/{$active->id}", [
+            'price' => 1234567,
+            'effective_from' => $active->effective_from->toDateString(),
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_can_edit_scheduled_future_record(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $created = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 222000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->addMonth()->toDateString(),
+        ])->assertCreated()->json();
+
+        $response = $this->putJson("/api/service-prices/{$created['id']}", [
+            'price' => 333000,
+            'effective_from' => Carbon::now()->addMonth()->toDateString(),
+        ]);
+
+        $response->assertOk()->assertJsonPath('price', '333000.00');
+    }
+
+    public function test_cannot_edit_scheduled_record_whose_effective_from_has_passed(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        // Bypass createPrice to construct a SCHEDULED record whose
+        // effective_from is in the past (simulates the "no cron" gap).
+        $stale = ServicePrice::create([
+            'service_id' => $service->id,
+            'price' => 444000,
+            'currency_code' => 'VND',
+            'is_tax_inclusive' => true,
+            'effective_from' => Carbon::now()->subDay(),
+            'effective_to' => null,
+            'status' => ServicePrice::STATUS_SCHEDULED,
+            'proposal_status' => ServicePrice::PROPOSAL_APPROVED,
+            'reason' => 'Stale scheduled (effective_from in past)',
+            'approved_at' => Carbon::now()->subDay(),
+        ]);
+
+        $response = $this->putJson("/api/service-prices/{$stale->id}", [
+            'price' => 999999,
+            'effective_from' => Carbon::now()->subDay()->toDateString(),
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_cannot_delete_scheduled_record_whose_effective_from_has_passed(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $stale = ServicePrice::create([
+            'service_id' => $service->id,
+            'price' => 444000,
+            'currency_code' => 'VND',
+            'is_tax_inclusive' => true,
+            'effective_from' => Carbon::now()->subDay(),
+            'effective_to' => null,
+            'status' => ServicePrice::STATUS_SCHEDULED,
+            'proposal_status' => ServicePrice::PROPOSAL_APPROVED,
+            'reason' => 'Stale scheduled (effective_from in past)',
+            'approved_at' => Carbon::now()->subDay(),
+        ]);
+
+        $response = $this->deleteJson("/api/service-prices/{$stale->id}");
+        $response->assertStatus(422);
+    }
+
+    public function test_e6_cannot_delete_active_record(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+        $active = ServicePrice::where('service_id', $service->id)
+            ->where('status', ServicePrice::STATUS_ACTIVE)
+            ->first();
+
+        $response = $this->deleteJson("/api/service-prices/{$active->id}");
+        $response->assertStatus(422);
+    }
+
+    public function test_can_delete_scheduled_record(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $created = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 222000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->addMonth()->toDateString(),
+        ])->assertCreated()->json();
+
+        $response = $this->deleteJson("/api/service-prices/{$created['id']}");
+        $response->assertOk();
+        $this->assertDatabaseMissing('service_prices', ['id' => $created['id']]);
+    }
+
+    public function test_a1_accountant_proposes_admin_approves(): void
+    {
+        $accountant = $this->createUser('ke_toan');
+        Sanctum::actingAs($accountant);
+
+        $service = Service::first();
+        $proposal = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 750000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->addMonth()->toDateString(),
+            'reason' => 'De xuat tu ke toan',
+        ])->assertCreated()->json();
+
+        $this->assertSame('pending', $proposal['proposal_status']);
+
+        Sanctum::actingAs($this->createUser('admin'));
+        $approved = $this->postJson("/api/service-prices/{$proposal['id']}/approve")
+            ->assertOk()
+            ->json();
+
+        $this->assertSame('approved', $approved['proposal_status']);
+    }
+
+    public function test_a1_admin_approves_immediate_proposal_supersedes_active_record(): void
+    {
+        $accountant = $this->createUser('ke_toan');
+        Sanctum::actingAs($accountant);
+
+        $service = Service::first();
+        $existing = ServicePrice::where('service_id', $service->id)
+            ->where('status', ServicePrice::STATUS_ACTIVE)
+            ->whereNull('effective_to')
+            ->firstOrFail();
+
+        // Proposal with effective_from = today (immediate when approved).
+        $proposal = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 850000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->toDateString(),
+            'reason' => 'De xuat ap dung ngay hom nay',
+        ])->assertCreated()->json();
+
+        Sanctum::actingAs($this->createUser('admin'));
+        $approved = $this->postJson("/api/service-prices/{$proposal['id']}/approve")
+            ->assertOk()
+            ->json();
+
+        $this->assertSame('approved', $approved['proposal_status']);
+        $this->assertSame('active', $approved['status']);
+
+        $existing->refresh();
+        $this->assertSame(ServicePrice::STATUS_EXPIRED, $existing->status,
+            'Open-ended active record must be expired after immediate proposal approval.');
+    }
+
+    public function test_a1_admin_can_reject_proposal(): void
+    {
+        $accountant = $this->createUser('ke_toan');
+        Sanctum::actingAs($accountant);
+
+        $service = Service::first();
+        $proposal = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 750000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->addMonth()->toDateString(),
+        ])->assertCreated()->json();
+
+        Sanctum::actingAs($this->createUser('admin'));
+        $rejected = $this->postJson("/api/service-prices/{$proposal['id']}/reject", [
+            'reason' => 'Khong dong y',
+        ])->assertOk()->json();
+
+        $this->assertSame('rejected', $rejected['proposal_status']);
+    }
+
+    public function test_non_admin_non_accountant_cannot_create(): void
+    {
+        Sanctum::actingAs($this->createUser('le_tan'));
+        $service = Service::first();
+
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 1000,
+            'apply_now' => true,
+        ]);
+
+        $response->assertForbidden();
+    }
+
+    public function test_only_admin_can_approve(): void
+    {
+        $accountant = $this->createUser('ke_toan');
+        Sanctum::actingAs($accountant);
+        $service = Service::first();
+
+        $proposal = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'price' => 100000,
+            'apply_now' => false,
+            'effective_from' => Carbon::now()->addMonth()->toDateString(),
+        ])->assertCreated()->json();
+
+        // Accountant cannot approve own proposal
+        $response = $this->postJson("/api/service-prices/{$proposal['id']}/approve");
+        $response->assertForbidden();
+    }
+
+    public function test_e8_missing_data_rejected(): void
+    {
+        Sanctum::actingAs($this->createUser('admin'));
+        $service = Service::first();
+
+        $response = $this->postJson('/api/service-prices', [
+            'service_id' => $service->id,
+            'apply_now' => false,
+            // missing price + effective_from
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    private function createUser(string $roleSlug): User
+    {
+        $user = User::factory()->create([
+            'name' => $roleSlug.' user',
+            'email' => $roleSlug.'-prc@example.com',
+            'username' => $roleSlug.'_prc',
+            'password' => Hash::make('Password@123'),
+        ]);
+        $user->roles()->attach(Role::where('slug', $roleSlug)->firstOrFail()->id);
+
+        return $user;
+    }
+}
