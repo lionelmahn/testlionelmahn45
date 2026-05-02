@@ -20,5 +20,6 @@ class DatabaseSeeder extends Seeder
         $this->call(ServicePackageSeeder::class);
         $this->call(ProfessionalProfileSeeder::class);
         $this->call(WorkShiftTemplateSeeder::class);
+        $this->call(ToothStatusSeeder::class);
     }
 }

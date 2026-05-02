@@ -24,6 +24,7 @@ class PermissionSeeder extends Seeder
             'reports' => 'Bao cao',
             'schedules' => 'Lich lam viec',
             'prices' => 'Bang gia dich vu',
+            'tooth_statuses' => 'Trang thai rang',
         ];
 
         $actions = [
@@ -84,6 +85,18 @@ class PermissionSeeder extends Seeder
             $accountant = Role::where('slug', 'ke_toan')->first();
             if ($accountant) {
                 $accountant->permissions()->syncWithoutDetaching($accountantExtra);
+            }
+        }
+
+        // UC4.4 — bac_si and other clinical roles can read tooth statuses
+        // (master data used in dental records). Mutations remain admin-only.
+        $toothStatusView = Permission::where('slug', 'tooth_statuses.view')->value('id');
+        if ($toothStatusView) {
+            foreach (['bac_si', 'le_tan', 'ke_toan'] as $slug) {
+                $role = Role::where('slug', $slug)->first();
+                if ($role) {
+                    $role->permissions()->syncWithoutDetaching([$toothStatusView]);
+                }
             }
         }
     }
